@@ -1,0 +1,76 @@
+# ==========================================
+
+# 1. Cấu hình cho Python
+
+# ==========================================
+
+Byte-compiled / optimized / DLL files
+
+pycache/
+*.py[cod]
+*$py.class
+
+# Môi trường ảo (Virtual Environments)
+
+venv/
+env/
+.env/
+.venv/
+
+Log files
+
+*.log
+
+# ==========================================
+
+# 2. Cấu hình cho Hạ tầng PKI & Mật mã
+
+# KHÔNG BAO GIỜ đẩy Private Key lên GitHub!
+
+# ==========================================
+
+# Các file chứa khóa bí mật (Private Keys)
+
+*.key
+*.pem
+!ca.pem   
+#(Ngoại lệ: Có thể giữ file public certificate của CA nếu cần)
+!server.pem
+*.p8
+*.p12
+*.pfx
+
+# Các file cơ sở dữ liệu tạm của OpenSSL CA
+
+P2_PKI_CA/demoCA/index.txt.attr
+P2_PKI_CA/demoCA/index.txt.old
+P2_PKI_CA/demoCA/serial.old
+P2_PKI_CA/demoCA/crlnumber.old
+
+# Các file dữ liệu test (File rác khi gửi qua lại trong Chat)
+
+P1_SecureChat/received_files/
+P1_SecureChat/test_data/
+*.tmp
+
+# ==========================================
+
+# 3. Cấu hình cho Hệ điều hành & IDE (Code Editor)
+
+# ==========================================
+
+VS Code
+
+.vscode/
+
+IntelliJ / PyCharm
+
+.idea/
+
+macOS
+
+.DS_Store
+
+Windows
+
+Thumbs.db
