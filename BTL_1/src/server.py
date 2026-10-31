@@ -1,7 +1,7 @@
 import socket
 import threading
 from config import HOST, PORT
-from protocol import send_msg, recv_msg
+from protocol import send_msg, recv_msg, valid_name
 
 clients = {}
 clients_lock = threading.Lock()
@@ -31,8 +31,8 @@ def handle_client(conn, address):
             send_msg(conn, {"type": "error", "msg": "Gói đầu tiên phải là register."})
             return
         name = str(first.get("name", "")).strip()
-        if not name or len(name) > 32:
-            send_msg(conn, {"type": "error", "msg": "Tên không hợp lệ (1-32 ký tự)."})
+        if not valid_name(name):
+            send_msg(conn, {"type": "error", "msg": "Tên không hợp lệ (chữ, số, _ hoặc -, 1-32 ký tự)."})
             return
         with clients_lock:
             if name in clients:
@@ -55,6 +55,9 @@ def handle_client(conn, address):
                 safe_send(conn, {"type": "error", "msg": f"Người nhận '{recipient}' không trực tuyến."})
                 continue
             # Demo relay: chuyển tiếp nguyên gói, không giải mã nội dung.
+            # Server đặt lại "from" theo tên đã đăng ký để client khác không giả danh ở tầng định tuyến.
+            # (Việc xác thực danh tính thật vẫn do chữ ký Ed25519 của handshake đảm nhiệm.)
+            packet["from"] = name
             try:
                 safe_send(target, packet)
                 print(f"[SERVER] relay type={packet_type} from={name} to={recipient}")

@@ -1,0 +1,7 @@
+keys/
+certs/
+downloads/
+__pycache__/
+.pytest_cache/
+.venv/
+*.part

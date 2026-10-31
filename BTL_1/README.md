@@ -100,7 +100,40 @@ Kịch bản này chứng minh chữ ký `Ed25519` phát hiện và chặn đứ
    - **T2 (Alice):** `python client.py --port 50001`
    - **T3 (Bob):** `python client.py --port 50001`
 2. **Tại Alice gõ:** `/msg Bob Thử tấn công`
-3. **Kết quả:** MitM in ra thông báo đã sửa gói tin. Alice và Bob ngay lập tức báo lỗi đỏ `[HANDSHAKE] Từ chối Bob: Chữ ký không hợp lệ...` và chặn đứng gói tin, không cho gửi đi.
+3. **Kết quả:** MitM in ra thông báo đã sửa gói tin. Bob báo `[HANDSHAKE] Từ chối Alice: Chữ ký không hợp lệ...`; Alice nhận lỗi từ Bob và báo `Handshake với Bob thất bại`. Không có tin nào được gửi đi.
+
+### 5. Các kịch bản tấn công bổ sung (mitm_server.py)
+
+| `--attack` | Mô phỏng | Kết quả mong đợi |
+|---|---|---|
+| `tamper-hello` | Lật 1 bit nonce trong gói bắt tay | `[HANDSHAKE] Từ chối ...: Chữ ký không hợp lệ` |
+| `swap-eph` | Thay khóa X25519 tạm thời trong gói bắt tay | Từ chối vì chữ ký không khớp |
+| `impersonate` | MitM thật: tự bắt tay với **cả hai bên** bằng khóa Ed25519 của kẻ tấn công | Cả hai bên từ chối vì khác khóa đã pin |
+| `tamper-ct` | Lật 1 bit ciphertext của chat/tệp sau khi đã có phiên | `[CHAT ERROR] Xác thực thất bại: dữ liệu bị sửa...` |
+| `replay` | Gửi mỗi gói chat/tệp 2 lần | Bản thứ hai bị từ chối (`counter không tăng`), tin chỉ hiện một lần |
+
+Chạy giống mục 4: `python mitm_server.py --attack <chế độ> --port 50001`, rồi hai client với `--port 50001`.
+Với `tamper-ct` và `replay`, bắt tay phải thành công trước, nên gõ `/msg` bình thường.
+
+### 6. Các cơ chế bảo vệ (để viết báo cáo)
+
+- **Xác thực danh tính**: chữ ký Ed25519 trên Hello; khóa công khai của đối phương được *pin* trong `keys/<tên>.pub`. Không có khóa pin thì từ chối.
+- **Khóa phiên**: X25519 tạm thời + HKDF-SHA256; hai khóa riêng cho hai chiều; digest MSSV nằm trong salt, transcript và dữ liệu được ký (không dùng làm khóa).
+- **Chống sửa đổi**: AES-256-GCM cho chat, `file_meta`, từng khối tệp và `file_end` (AAD gồm `file_id`, chỉ số khối, tổng số khối).
+- **Chống replay/đảo thứ tự**: counter tăng dần nằm trong AAD; bên nhận chỉ nhận counter lớn hơn lần trước.
+- **Xác nhận khóa**: phiên chỉ được kích hoạt sau khi hai bên giải mã được gói xác nhận của nhau.
+- **Tệp nhận**: tên tệp được cắt về basename, lưu trong `downloads/`, kiểm tra số khối, kích thước và SHA-256.
+
+**Giới hạn còn lại (nên nêu trong báo cáo):** server vẫn thấy ai nhắn cho ai và kích thước gói; không có forward secrecy giữa các tin trong cùng phiên (chỉ giữa các phiên); khóa pin phải được phân phối ngoài kênh; kẻ tấn công vẫn có thể chặn/xóa gói (từ chối dịch vụ); kẻ phát lại một Hello cũ có thể làm bên nhận tốn một lượt bắt tay nhưng không lấy được khóa phiên.
+
+### 7. Chạy kiểm thử
+
+```bash
+# từ thư mục gốc của dự án, trong môi trường ảo
+python -m pytest -v
+```
+Gồm: unit test mật mã/bắt tay, unit test `SecureSession` (replay, đảo thứ tự, sửa đổi), và test tích hợp qua socket thật (chat, truyền tệp, các kịch bản MitM). Lưu kết quả vào `evidence/`:
+`python -m pytest -v > evidence/pytest_result.txt`
 
 ---
 

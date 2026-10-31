@@ -1,7 +1,8 @@
 # ca_setup.py
 import datetime
+from datetime import timezone
 from cryptography import x509
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
@@ -32,11 +33,18 @@ def generate_ca():
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
     ).add_extension(
         x509.BasicConstraints(ca=True, path_length=None), critical=True,
+    ).add_extension(
+        x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
+                      content_commitment=False, key_encipherment=False, data_encipherment=False,
+                      key_agreement=False, encipher_only=False, decipher_only=False),
+        critical=True,
+    ).add_extension(
+        x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False,
     ).sign(ca_key, hashes.SHA256())
 
     # Lưu file
@@ -76,11 +84,22 @@ def generate_server_cert():
     ).serial_number(
         x509.random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
     ).add_extension(
         x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False,
+    ).add_extension(
+        x509.BasicConstraints(ca=False, path_length=None), critical=True,
+    ).add_extension(
+        x509.KeyUsage(digital_signature=True, key_encipherment=True, content_commitment=False,
+                      data_encipherment=False, key_agreement=False, key_cert_sign=False,
+                      crl_sign=False, encipher_only=False, decipher_only=False),
+        critical=True,
+    ).add_extension(
+        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False,
+    ).add_extension(
+        x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False,
     ).sign(ca_key, hashes.SHA256())
 
     # Lưu file

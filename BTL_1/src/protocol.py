@@ -29,3 +29,13 @@ def recv_msg(sock: socket.socket) -> dict:
     if not isinstance(obj, dict):
         raise ValueError("Gói tin phải là JSON object.")
     return obj
+
+
+import re
+
+NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def valid_name(name) -> bool:
+    """Tên người dùng chỉ gồm chữ/số/_/-; dùng cho đăng ký, định tuyến và ghép đường dẫn khóa."""
+    return isinstance(name, str) and NAME_RE.match(name) is not None
