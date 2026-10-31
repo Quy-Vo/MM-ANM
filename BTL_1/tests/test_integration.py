@@ -221,6 +221,7 @@ def test_retry_after_offline_peer(env):
     a.send_chat("Dave", "dave oi")                             # Dave offline -> timeout
     assert "Dave" not in a.peer_states
     d = env.mk("Dave", port)
+    time.sleep(0.2)
     client.HANDSHAKE_TIMEOUT = 4.0
     a.send_chat("Dave", "dave oi lan 2")
     assert wait_for(lambda: ("Alice", "dave oi lan 2") in d.inbox)

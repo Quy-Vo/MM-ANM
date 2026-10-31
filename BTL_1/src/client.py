@@ -321,6 +321,20 @@ class ChatClient:
             self._say(f"[SYSTEM] {packet.get('msg')}")
         elif kind == "error":
             self._say(f"[ERROR] {packet.get('msg')}")
+        elif kind == "error":
+                    msg = packet.get('msg')
+                    print(f"\n[ERROR] {msg}\n> ", end="", flush=True)
+                    
+                    # THÊM ĐOẠN NÀY: Hủy bắt tay nếu người nhận offline
+                    to = packet.get("to")
+                    if to and to != self.name:
+                        with self.peers_lock:
+                            state = self.peer_states.get(to)
+                            if state and state.session is None:
+                                state.error = msg
+                                state.ready.set() # Đánh thức ensure_session
+                            self.peer_states.pop(to, None) # Xóa state để lần sau gửi lại từ đầu
+            
         elif kind == "hs_hello":
             self.handle_hs_hello(packet)
         elif kind == "hs_confirm":

@@ -8,6 +8,7 @@ import argparse
 import functools
 import http.server
 import os
+import socket
 import ssl
 
 from ca import CA_CN, OU_TEXT
@@ -26,7 +27,25 @@ class QuietServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
     def handle_error(self, request, client_address):   # lỗi bắt tay TLS của client bị từ chối là bình thường
-        pass
+        if os.environ.get("HTTPS_DEBUG"):               # đặt HTTPS_DEBUG=1 để xem lỗi phía server khi cần gỡ lỗi
+            super().handle_error(request, client_address)
+
+    def shutdown_request(self, request):
+        """Đóng chậm (lingering close): đóng chiều gửi, đọc nốt dữ liệu còn lại cho tới khi client đóng, rồi mới close.
+        Đóng socket ngay khi còn dữ liệu chưa đọc có thể gây RST; trên Windows client khi đó mất phần phản hồi chưa đọc
+        và báo WinError 10054."""
+        try:
+            request.settimeout(1.0)
+            try:
+                request.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            while request.recv(4096):
+                pass
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.close_request(request)
 
 
 def ensure_index(www: str) -> None:

@@ -189,7 +189,7 @@ class MitmServer:
                     with self.lock:
                         target = self.clients.get(target_name)
                     if target is None:
-                        self.safe_send(conn, {"type": "error", "msg": f"'{target_name}' không online."})
+                        self.safe_send(conn, {"type": "error", "to": to, "msg": f"'{to}' không online."})
                         continue
                     self.safe_send(target, pkt)
         except (ConnectionError, OSError, ValueError) as e:

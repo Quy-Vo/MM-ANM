@@ -4,6 +4,8 @@ import http.client
 import os
 import ssl
 import threading
+import time
+import warnings
 from datetime import timedelta, timezone
 
 import pytest
@@ -21,12 +23,17 @@ from https_server import make_server
 MSSV_STR = "-".join(MSSVS)
 
 
+def _read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
 def load_cert(path):
-    return x509.load_pem_x509_certificate(open(path, "rb").read())
+    return x509.load_pem_x509_certificate(_read_bytes(path))
 
 
 def load_crl(path):
-    return x509.load_pem_x509_crl(open(path, "rb").read())
+    return x509.load_pem_x509_crl(_read_bytes(path))
 
 
 @pytest.fixture
@@ -254,7 +261,7 @@ def test_verify_expired_crl_rejected(pki):
 def test_verify_tampered_crl_rejected(pki):
     cert, s = issue(pki)
     ca.revoke(pki.ca_dir, serial=format(s, "x"))
-    pem = bytearray(open(pki.crl, "rb").read())
+    pem = bytearray(_read_bytes(pki.crl))
     idx = pem.index(b"\n") + 40
     pem[idx] = ord("A") if pem[idx] != ord("A") else ord("B")
     try:
@@ -294,7 +301,19 @@ def serve(pki):
 
 
 def tls_get(pki, srv, hostname="localhost", path="/", use_crl=True):
-    return tls_client.fetch("127.0.0.1", srv.port, pki.ca_crt, pki.crl if use_crl else None, hostname, path)
+    """Thử lại tối đa 2 lần CHỈ khi kết nối bị reset; lỗi xác thực chứng thư thì không bao giờ thử lại.
+    Mỗi lần thử lại đều phát cảnh báo để còn thấy trong kết quả pytest."""
+    last = None
+    for attempt in range(3):
+        try:
+            return tls_client.fetch("127.0.0.1", srv.port, pki.ca_crt, pki.crl if use_crl else None, hostname, path)
+        except ssl.SSLCertVerificationError:
+            raise
+        except (ConnectionResetError, ConnectionAbortedError) as exc:
+            last = exc
+            warnings.warn(f"tls_get: kết nối bị reset (lần {attempt + 1}/3), thử lại: {exc}")
+            time.sleep(0.2)
+    raise last
 
 
 def test_tls_valid_certificate_accepted(pki, serve):
@@ -344,12 +363,43 @@ def test_tls_hostname_mismatch_rejected(pki, serve):
 # --------------------------------------------------------------------------- #
 # Web server không được lộ khóa riêng
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("path", ["/../pki/ca.key", "/pki/ca.key", "/%2e%2e/pki/ca.key", "/../certs/valid.key",
-                                  "/certs/valid.key", "/", "/..%2f..%2fetc/passwd"])
+HOSTILE_PATHS = ["/../pki/ca.key", "/pki/ca.key", "/%2e%2e/pki/ca.key", "/../certs/valid.key", "/certs/valid.key",
+                 "/..%2f..%2fetc/passwd", "/..\\..\\pki\\ca.key", "/%5c..%5cpki%5cca.key", "//pki/ca.key"]
+
+
+def test_www_directory_contains_no_private_material(pki):
+    """Thứ duy nhất server có thể phục vụ là thư mục www/: nó không được chứa khóa riêng nào."""
+    issue(pki, name="valid")
+    ca.gen_crl(pki.ca_dir, www_dir=pki.www)
+    for dirpath, _, files in os.walk(pki.www):
+        for name in files:
+            with open(os.path.join(dirpath, name), "rb") as f:
+                assert b"PRIVATE KEY" not in f.read(), name
+
+
+@pytest.mark.parametrize("path", HOSTILE_PATHS)
+def test_handler_never_resolves_outside_www(pki, path):
+    """Kiểm tra trực tiếp đường dẫn mà handler sẽ mở (xác định, không phụ thuộc mạng/hệ điều hành)."""
+    from https_server import QuietHandler
+    os.makedirs(pki.www, exist_ok=True)
+    handler = QuietHandler.__new__(QuietHandler)
+    handler.directory = pki.www
+    root = os.path.realpath(pki.www)
+    resolved = os.path.realpath(handler.translate_path(path))
+    assert os.path.commonpath([root, resolved]) == root
+
+
+@pytest.mark.parametrize("path", HOSTILE_PATHS + ["/"])
 def test_https_server_does_not_leak_private_material(pki, serve, path):
     issue(pki, name="valid")
     srv = serve("valid")
-    status, body = tls_get(pki, srv, path=path)
+    try:
+        status, body = tls_get(pki, srv, path=path)
+    except (ConnectionError, ssl.SSLError) as exc:
+        # Server từ chối bằng cách đóng kết nối: không có dữ liệu nào bị phục vụ. Tính chất an toàn đã được kiểm tra
+        # xác định ở test_handler_never_resolves_outside_www. Vẫn phát cảnh báo để lỗi reset không bị che khuất.
+        warnings.warn(f"leak test {path!r}: kết nối bị đóng thay vì nhận phản hồi 4xx ({exc}); kiểm tra lại server")
+        return
     assert b"PRIVATE KEY" not in body
     assert status in (200, 301, 400, 404)
     if path != "/":

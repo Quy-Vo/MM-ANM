@@ -52,7 +52,8 @@ def handle_client(conn, address):
             with clients_lock:
                 target = clients.get(recipient)
             if target is None:
-                safe_send(conn, {"type": "error", "msg": f"Người nhận '{recipient}' không trực tuyến."})
+                # Thêm "to": recipient để client biết ai đang offline
+                safe_send(conn, {"type": "error", "to": recipient, "msg": f"Người nhận '{recipient}' không trực tuyến."})
                 continue
             # Demo relay: chuyển tiếp nguyên gói, không giải mã nội dung.
             # Server đặt lại "from" theo tên đã đăng ký để client khác không giả danh ở tầng định tuyến.
