@@ -29,6 +29,7 @@ from config import (
 from protocol import send_msg, recv_msg, valid_name
 from file_transfer import sha256_file, validate_file
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+import crypto
 from handshake import Initiator, Responder, ROLE_INITIATOR, ROLE_RESPONDER
 from secure_session import SecureSession
 
@@ -149,6 +150,10 @@ class ChatClient:
             state.error = None
             self.peer_states[state.name] = state
             state.ready.set()
+        # Bằng chứng yêu cầu MSSV của đề: Key = SHA256(MSSV_1 || MSSV_2 || ...) là đầu vào của KDF (salt/transcript),
+        # KHÔNG phải khóa AES trực tiếp. Khóa phiên thật đến từ X25519 + HKDF.
+        self._say(f"[HANDSHAKE] Phiên với {state.name} đã thiết lập. "
+                  f"Hello, We are {', '.join(MSSVS)} | SHA256(MSSV)={crypto.hash_mssvs(MSSVS).hex()}")
 
     def ensure_session(self, peer: str):
         if not valid_name(peer):

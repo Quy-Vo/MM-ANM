@@ -137,29 +137,52 @@ Gồm: unit test mật mã/bắt tay, unit test `SecureSession` (replay, đảo 
 
 ---
 
-## 🌐 PHẦN 1.2: HẠ TẦNG KHÓA CÔNG KHAI NỘI BỘ (INTERNAL CA)
+## 🌐 PHẦN 1.2: HẠ TẦNG KHÓA CÔNG KHAI NỘI BỘ (CA + CRL)
 
-### 1. Lồng ghép MSSV vào Chứng thư X.509
-Chứng thư số được sinh ra bởi CA nội bộ có chứa thông tin định danh nhóm:
-- **Common Name (CN):** `CA-Root-2412915-2413675-2412965`
-- **Organizational Unit (OU):** `Faculty of Computer Science and Engineer - 2412915-2413675-2412965`
+Chứng thư X.509 do CA nội bộ cấp, có CN/OU chứa MSSV theo đề (OU dùng dấu gạch dài `–` như trong đề):
+- CA: `CN=CA-Root-<MSSV_1>-<MSSV_2>-...`, `OU=Faculty of Computer Science and Engineer – <MSSV_1>-<MSSV_2>-...`
+- Chứng thư Web Server mang cùng OU; có SAN, `BasicConstraints CA:FALSE`, `EKU serverAuth`, SKI/AKI và **CRL Distribution Points**.
 
-### 2. Hướng dẫn chạy Demo CA & HTTPS
-
-**Bước 1: Khởi tạo Root CA và cấp phát chứng thư cho Web Server**
+### 1. Khởi tạo nhanh
 ```bash
-python ca_setup.py
+cd src
+python ca_setup.py            # tạo CA + cấp chứng thư localhost -> pki/, certs/, www/
+python https_server.py        # https://localhost:4443  (chỉ phục vụ thư mục www/)
 ```
-*(Kết quả: Sinh ra thư mục `certs/` chứa 4 file: `ca.crt`, `ca.key`, `server.crt`, `server.key`).*
+Trình duyệt sẽ cảnh báo vì chưa tin CA: nhập `www/ca.crt` (hoặc `certs/ca.crt`) vào kho "Trusted Root" để thấy ổ khóa hợp lệ.
 
-**Bước 2: Khởi chạy Web Server (HTTPS)**
+### 2. Quản lý CA (`ca.py`)
+| Lệnh | Tác dụng |
+|---|---|
+| `python ca.py init` | Tạo Root CA và CRL rỗng đầu tiên |
+| `python ca.py issue --cn localhost --san localhost --san 127.0.0.1 --name web1` | Cấp chứng thư (tạo khóa mới) |
+| `python ca.py issue --csr req.csr --name web2` | Ký CSR của máy chủ (CA không thấy khóa riêng; CA tự đặt `CA:FALSE`, bỏ qua mọi quyền CA mà CSR xin) |
+| `python ca.py revoke --serial <hex> --reason key_compromise` | Thu hồi + phát hành lại CRL (CRL Number tăng) |
+| `python ca.py gen-crl` | Phát hành lại CRL |
+| `python ca.py list` | Sổ cấp phát và trạng thái |
+
+`pki/ca.key` là khóa riêng của CA, **không đưa lên Git, không đặt trong thư mục web** (đã có trong `.gitignore`).
+
+### 3. Kịch bản thử nghiệm xác thực (tự động)
 ```bash
-python https_server.py
+python pki_demo.py
 ```
+Dựng CA thật trong thư mục tạm, chạy HTTPS thật và kiểm tra bằng hai cách (`verify_chain` ở tầng ứng dụng và OpenSSL ở tầng TLS):
 
-**Bước 3: Kiểm tra chứng thư trên Trình duyệt**
-1. Mở trình duyệt (Chrome/Edge/Cốc Cốc), truy cập: `https://localhost:4443`
-2. Trình duyệt sẽ cảnh báo (do CA tự ký). Bấm **Advanced (Nâng cao)** $\rightarrow$ **Proceed to localhost (Tiếp tục)**.
-3. Nhấn vào biểu tượng **Ổ khóa** trên thanh địa chỉ $\rightarrow$ Chọn **Connection is secure** $\rightarrow$ **Certificate is valid** *(hoặc xem chi tiết chứng thư)*.
-4. Kiểm tra tab **Details (Chi tiết)** tại mục **Issuer (Tổ chức phát hành)** để xác nhận thông tin `CN` và `OU` đã lồng ghép đúng MSSV của nhóm.
+| # | Kịch bản | Kết quả |
+|---|---|---|
+| 1 | Chứng thư hợp lệ | Thành công, HTTP 200 |
+| 2 | Chứng thư đã bị thu hồi (CRL) | Từ chối: `certificate revoked` |
+| 3 | Chứng thư do CA lạ cấp | Từ chối: `unable to get local issuer certificate` |
+| 4 | Chứng thư đã hết hạn | Từ chối: `certificate has expired` |
+| 5 | Sai tên máy chủ | Từ chối: `Hostname mismatch` |
 
+Kiểm tra thủ công với một máy chủ đang chạy:
+```bash
+python tls_client.py --port 4443 --ca certs/ca.crt --crl pki/crl.pem            # có kiểm tra CRL
+python tls_client.py --port 4443 --ca certs/ca.crt --no-crl                      # đối chứng: không kiểm tra CRL
+python ca.py revoke --serial $(python ca.py list | awk '{print $1}' | tail -1)   # thu hồi rồi chạy lại lệnh đầu
+```
+`verify_chain` đóng khi có lỗi: thiếu CRL, CRL hết hạn, CRL do CA khác ký hoặc bị sửa đều bị từ chối.
+
+**Giới hạn:** chỉ dùng CRL (chưa có OCSP); CRL được phát hành thủ công và hết hạn sau 7 ngày; khóa CA không mã hóa bằng mật khẩu (chấp nhận được cho môi trường thực hành).

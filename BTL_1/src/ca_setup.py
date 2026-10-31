@@ -1,118 +1,22 @@
-# ca_setup.py
-import datetime
-from datetime import timezone
-from cryptography import x509
-from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
+"""
+ca_setup.py — Cài đặt nhanh: tạo Root CA (CN/OU chứa MSSV), cấp chứng thư cho localhost, sinh CRL.
+
+Tương đương: python ca.py init && python ca.py issue --cn localhost --san localhost --san 127.0.0.1
+Kết quả: pki/ (trạng thái CA), certs/ (ca.crt, server.crt, server.key), www/ (ca.crt, ca.crl công khai).
+"""
 import os
+import shutil
 
-MSSVS = ["2412915", "2413675", "2412965"]
-MSSV_STR = "-".join(MSSVS)
-os.makedirs("certs", exist_ok=True)
-
-def generate_ca():
-    # Tạo Private Key cho CA
-    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    
-    # Yêu cầu đề bài cho Subject
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, f"CA-Root-{MSSV_STR}"),
-        x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"Faculty of Computer Science and Engineer - {MSSV_STR}"),
-        x509.NameAttribute(NameOID.COUNTRY_NAME, "VN"),
-    ])
-    
-    # Build Certificate
-    ca_cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        issuer
-    ).public_key(
-        ca_key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        datetime.datetime.now(timezone.utc)
-    ).not_valid_after(
-        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
-    ).add_extension(
-        x509.BasicConstraints(ca=True, path_length=None), critical=True,
-    ).add_extension(
-        x509.KeyUsage(digital_signature=True, key_cert_sign=True, crl_sign=True,
-                      content_commitment=False, key_encipherment=False, data_encipherment=False,
-                      key_agreement=False, encipher_only=False, decipher_only=False),
-        critical=True,
-    ).add_extension(
-        x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False,
-    ).sign(ca_key, hashes.SHA256())
-
-    # Lưu file
-    with open("certs/ca.key", "wb") as f:
-        f.write(ca_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-    with open("certs/ca.crt", "wb") as f:
-        f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
-    print("[CA] Đã tạo Root CA thành công.")
-
-def generate_server_cert():
-    # Tạo Private Key cho Server
-    server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    
-    # Load CA
-    with open("certs/ca.key", "rb") as f:
-        ca_key = serialization.load_pem_private_key(f.read(), password=None)
-    with open("certs/ca.crt", "rb") as f:
-        ca_cert = x509.load_pem_x509_certificate(f.read())
-
-    # Subject cho Server (CN=localhost)
-    subject = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
-        x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, f"Faculty of Computer Science and Engineer - {MSSV_STR}"),
-    ])
-
-    # Build Server Cert
-    server_cert = x509.CertificateBuilder().subject_name(
-        subject
-    ).issuer_name(
-        ca_cert.subject
-    ).public_key(
-        server_key.public_key()
-    ).serial_number(
-        x509.random_serial_number()
-    ).not_valid_before(
-        datetime.datetime.now(timezone.utc)
-    ).not_valid_after(
-        datetime.datetime.now(timezone.utc) + datetime.timedelta(days=365)
-    ).add_extension(
-        x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False,
-    ).add_extension(
-        x509.BasicConstraints(ca=False, path_length=None), critical=True,
-    ).add_extension(
-        x509.KeyUsage(digital_signature=True, key_encipherment=True, content_commitment=False,
-                      data_encipherment=False, key_agreement=False, key_cert_sign=False,
-                      crl_sign=False, encipher_only=False, decipher_only=False),
-        critical=True,
-    ).add_extension(
-        x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False,
-    ).add_extension(
-        x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False,
-    ).sign(ca_key, hashes.SHA256())
-
-    # Lưu file
-    with open("certs/server.key", "wb") as f:
-        f.write(server_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-    with open("certs/server.crt", "wb") as f:
-        f.write(server_cert.public_bytes(serialization.Encoding.PEM))
-    print("[CA] Đã cấp chứng thư cho Server thành công.")
+import ca
 
 if __name__ == "__main__":
-    generate_ca()
-    generate_server_cert()
+    try:
+        cert = ca.init_ca(www_dir=ca.WWW_DIR)
+    except ca.CAError as exc:
+        print(f"[CA] {exc}  -> dùng CA hiện có")
+    else:
+        print(f"[CA] Đã tạo Root CA: {cert.subject.rfc4514_string()}")
+    _, serial = ca.issue(cn="localhost", sans=["localhost", "127.0.0.1"])
+    os.makedirs(ca.CERT_DIR, exist_ok=True)
+    shutil.copyfile(os.path.join(ca.CA_DIR, "ca.crt"), os.path.join(ca.CERT_DIR, "ca.crt"))
+    print(f"[CA] Đã cấp chứng thư cho Server (serial={serial:x}) → {ca.CERT_DIR}/server.crt")

@@ -17,4 +17,14 @@
 | + | Chứng thư thiếu extension, `utcnow()` cũ | `BasicConstraints`, `KeyUsage`, `EKU serverAuth`, SKI/AKI, `datetime.now(timezone.utc)` |
 
 Khác biệt giao thức: trường `nonce` của gói đổi thành `hdr` (dạng `"<counter>:<nonce_hex>"`).
-Chưa làm: kiểm tra thu hồi chứng thư (CRL/OCSP) cho phần 1.2.
+
+## Phần 1.2 (CA)
+
+- `ca.py`: CA có sổ cấp phát (`pki/index.json`): `init`, `issue` (khóa mới hoặc từ CSR), `revoke`, `gen-crl`, `list`.
+- CRL có chữ ký, CRL Number, lý do thu hồi; chứng thư có CRL Distribution Points.
+- `pki_verify.py`: xác thực chuỗi, thời hạn, tên máy chủ, EKU và thu hồi; mọi lỗi đều từ chối.
+- `tls_client.py`: kiểm tra CRL ngay ở tầng TLS (`VERIFY_CRL_CHECK_LEAF`).
+- `pki_demo.py`: 5 kịch bản xác thực chạy tự động (hợp lệ, thu hồi, CA lạ, hết hạn, sai tên).
+- `https_server.py`: chỉ phục vụ `www/`, tắt liệt kê thư mục (bản cũ phục vụ thư mục làm việc nên có thể tải được khóa riêng).
+- OU dùng dấu gạch dài `–` đúng như đề.
+- Client in `Hello, We are ... | SHA256(MSSV)=...` khi thiết lập phiên để làm bằng chứng cho yêu cầu MSSV.
