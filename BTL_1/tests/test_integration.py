@@ -43,8 +43,12 @@ def wait_for(cond, timeout=5.0):
     return cond()
 
 
+def read_log(path):
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
 def wait_port(port):
-    assert wait_for(lambda: _can_connect(port), 5), "tiến trình server không lên"
+    assert wait_for(lambda: _can_connect(port), 20), "tiến trình server không lên (xem file .log trong thư mục tạm)"
 
 
 def _can_connect(port):
@@ -74,14 +78,20 @@ def env(tmp_path, monkeypatch):
 
     def start(script, *args):
         port = free_port()
-        penv = dict(os.environ, CHAT_PORT=str(port), CHAT_KEYS_DIR=str(keys))
-        log = open(tmp_path / f"{script}_{port}.log", "w")
+        penv = dict(os.environ, CHAT_PORT=str(port), CHAT_KEYS_DIR=str(keys),
+                    PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+        log_path = tmp_path / f"{script}_{port}.log"
+        log = open(log_path, "w", encoding="utf-8")
         p = subprocess.Popen([sys.executable, "-u", os.path.join(SRC, script), *args] +
                              (["--port", str(port)] if script == "mitm_server.py" else []),
                              cwd=str(tmp_path), env=penv, stdout=log, stderr=subprocess.STDOUT)
+        log.close()                      # tiến trình con đã giữ handle riêng
         procs.append(p)
-        wait_port(port)
-        return port, tmp_path / f"{script}_{port}.log"
+        try:
+            wait_port(port)
+        except AssertionError:
+            raise AssertionError(f"Server/MitM không khởi động. Log:\n{read_log(log_path)}") from None
+        return port, log_path
 
     def mk(name, port, **kw):
         c = client.ChatClient(name, "127.0.0.1", port, **kw)
@@ -97,7 +107,11 @@ def env(tmp_path, monkeypatch):
             pass
     for p in procs:
         p.terminate()
-        p.wait(timeout=5)
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=5)
 
 
 @pytest.fixture
@@ -265,7 +279,7 @@ def test_file_meta_is_encrypted(pair):
     env, _, a, b = pair
     sent, _ = spy(a)
     src = env.tmp / "tai-lieu-mat.txt"
-    src.write_text("noi dung")
+    src.write_text("noi dung", encoding="utf-8")
     a.send_file("Bob", str(src))
     assert wait_for(lambda: b.files_ok)
     meta = [p for p in sent if p["type"] == "file_meta"][0]
@@ -285,7 +299,7 @@ def test_tampered_file_meta_rejected(pair):
         orig(p)
     a.send_packet = tamper
     src = env.tmp / "f.txt"
-    src.write_text("abc")
+    src.write_text("abc", encoding="utf-8")
     a.send_file("Bob", str(src))
     time.sleep(0.8)
     assert b.files_ok == []
@@ -335,7 +349,7 @@ def test_mitm_passive_sees_plaintext_without_crypto(env):
     a, b = env.mk("Alice", port, use_crypto=False), env.mk("Bob", port, use_crypto=False)
     time.sleep(0.2)
     a.send_chat("Bob", "Tai khoan 123456")
-    assert wait_for(lambda: "Tai khoan 123456" in log.read_text())
+    assert wait_for(lambda: "Tai khoan 123456" in read_log(log))
 
 
 def test_mitm_passive_sees_only_ciphertext_with_crypto(env):
@@ -344,7 +358,7 @@ def test_mitm_passive_sees_only_ciphertext_with_crypto(env):
     time.sleep(0.2)
     a.send_chat("Bob", "Tai khoan 123456")
     assert wait_for(lambda: b.inbox)
-    text = log.read_text()
+    text = read_log(log)
     assert "Tai khoan 123456" not in text and "CIPHERTEXT" in text
 
 

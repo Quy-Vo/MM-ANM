@@ -19,6 +19,7 @@ import json
 import os
 import re
 import socket
+import sys
 import threading
 import uuid
 
@@ -32,6 +33,16 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import crypto
 from handshake import Initiator, Responder, ROLE_INITIATOR, ROLE_RESPONDER
 from secure_session import SecureSession
+
+
+def emit(text="", **kwargs) -> None:
+    """print() không bao giờ làm sập luồng vì lỗi bảng mã (ví dụ Windows cp1252 khi chuyển hướng ra file)."""
+    try:
+        print(text, **kwargs)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(str(text).encode(enc, errors="replace").decode(enc, errors="replace"), **kwargs)
+
 
 FILE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -113,7 +124,7 @@ class ChatClient:
             send_msg(self.sock, packet)
 
     def _say(self, text: str) -> None:
-        print(f"\n{text}\n> ", end="", flush=True)
+        emit(f"\n{text}\n> ", end="", flush=True)
 
     def _active_session(self, peer: str):
         if not self.use_crypto:
@@ -302,7 +313,7 @@ class ChatClient:
                 except Exception as exc:   # một gói xấu không được làm chết luồng nhận
                     self._say(f"[CLIENT] Bỏ qua gói lỗi ({packet.get('type')}): {exc}")
         except (ConnectionError, OSError, ValueError) as exc:
-            print(f"\n[CLIENT] Mất kết nối: {exc}")
+            emit(f"\n[CLIENT] Mất kết nối: {exc}")
 
     def dispatch(self, packet: dict) -> None:
         kind = packet.get("type")
@@ -363,19 +374,19 @@ class ChatClient:
         try:
             session = self.ensure_session(recipient)
         except (RuntimeError, ValueError) as exc:
-            print(f"[HANDSHAKE] {exc}")
+            emit(f"[HANDSHAKE] {exc}")
             return
         self._send_secure(recipient, session, "chat", text.encode("utf-8"), b"chat")
 
     def send_file(self, recipient: str, path: str) -> None:
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isfile(path):
-            print("Không tìm thấy tệp.")
+            emit("Không tìm thấy tệp.")
             return
         try:
             session = self.ensure_session(recipient)
         except (RuntimeError, ValueError) as exc:
-            print(f"[HANDSHAKE] {exc}")
+            emit(f"[HANDSHAKE] {exc}")
             return
 
         size = validate_file(path)
@@ -395,7 +406,7 @@ class ChatClient:
                 self._send_secure(recipient, session, "file_chunk", block, aad, file_id=file_id, index=index)
                 index += 1
         self._send_secure(recipient, session, "file_end", b"end", b"file_end:" + file_id.encode(), file_id=file_id)
-        print(f"Đã gửi {os.path.basename(path)} ({size} byte).")
+        emit(f"Đã gửi {os.path.basename(path)} ({size} byte).")
 
     # ------------------------------------------------------------------ #
     # Nhận tệp
@@ -504,8 +515,8 @@ class ChatClient:
     # ------------------------------------------------------------------ #
     def run(self) -> None:
         mode = "SECURE (Ed25519 + X25519 + AES-GCM)" if self.use_crypto else "FAKE (không mã hóa)"
-        print(f"Chế độ: {mode}")
-        print("Lệnh: /msg TEN tin nhắn | /file TEN đường_dẫn | /quit")
+        emit(f"Chế độ: {mode}")
+        emit("Lệnh: /msg TEN tin nhắn | /file TEN đường_dẫn | /quit")
         try:
             while True:
                 command = input("> ").strip()
@@ -514,20 +525,20 @@ class ChatClient:
                 if command.startswith("/msg "):
                     parts = command.split(" ", 2)
                     if len(parts) < 3 or not parts[2]:
-                        print("Cú pháp: /msg TEN tin nhắn")
+                        emit("Cú pháp: /msg TEN tin nhắn")
                         continue
                     self.send_chat(parts[1], parts[2])
                 elif command.startswith("/file "):
                     parts = command.split(" ", 2)
                     if len(parts) < 3:
-                        print("Cú pháp: /file TEN đường_dẫn")
+                        emit("Cú pháp: /file TEN đường_dẫn")
                         continue
                     try:
                         self.send_file(parts[1], parts[2].strip('"'))
                     except (OSError, ValueError) as exc:
-                        print(f"Lỗi gửi tệp: {exc}")
+                        emit(f"Lỗi gửi tệp: {exc}")
                 elif command:
-                    print("Lệnh không hợp lệ.")
+                    emit("Lệnh không hợp lệ.")
         except (KeyboardInterrupt, EOFError):
             pass
         finally:
@@ -547,12 +558,12 @@ def main() -> None:
 
     name = input("Tên của bạn: ").strip()
     if not valid_name(name):
-        print("Tên chỉ gồm chữ, số, '_' hoặc '-' (1-32 ký tự).")
+        emit("Tên chỉ gồm chữ, số, '_' hoặc '-' (1-32 ký tự).")
         return
     try:
         ChatClient(name, args.host, args.port, use_crypto=not args.no_crypto).run()
     except (ConnectionRefusedError, OSError) as exc:
-        print(f"Không kết nối được server: {exc}")
+        emit(f"Không kết nối được server: {exc}")
 
 
 if __name__ == "__main__":
